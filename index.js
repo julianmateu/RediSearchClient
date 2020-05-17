@@ -21,6 +21,7 @@ const
     language    : 'LANGUAGE',
     payload     : 'PAYLOAD',
     replace     : 'REPLACE',
+    partial     : 'PARTIAL',
     limit       : 'LIMIT',
     tag         : 'TAG',
     tagSep      : 'SEPARATOR',
@@ -198,7 +199,9 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
 
       if (!checked) { clientCheck(); }                                    // bindings check
 
-      addArgs.push(lastArgs.opts.score || 1, s.fields);                   // Score, if we've got one and then FIELDS
+      addArgs.push(lastArgs.opts.score || 1);
+      addArgs.push.apply(addArgs, lastArgs.opts.extras || []);
+      addArgs.push(s.fields);                   // Score, if we've got one and then FIELDS
       Object.keys(values).forEach(function(aField) {                      // Get the keys of the passed in plain object then iterate
         addArgs.push(aField,values[aField]);                              // interlace field name / value
       });

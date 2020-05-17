@@ -26,8 +26,7 @@ const
     tagSep      : 'SEPARATOR',
 
     // node_redis strings
-    multiConstructor
-                : 'Multi'
+    multiConstructor: 'Multi'
   },
   defaultNumberOfResults                                                  // While 10 is the default in RediSearch, we'll always send it for code consistency
                       = 10,
@@ -57,9 +56,9 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
     checked             = false,                                          // Have we checked for bindings
     client,                                                               // client is the general client being used for all operations on this index
     rediSearchObj;                                                        // We'll eventually return this and also use to do chaining correctly
-  
+
   /* internal utility functions */
-  const chainer = function(cObj) {                                        // convenience function to consistenty handling function chaining even while in multi                                         
+  const chainer = function(cObj) {                                        // convenience function to consistenty handling function chaining even while in multi
     return cObj.constructor.name === s.multiConstructor ?                 // We look if the constructor has a name equal to 'Multi' (although any node_redis pipeline will identify this way)
       cObj : rediSearchObj;                                               // if it is a Multi, then we return that, otherwise we return the original return object of this outer fuction
   }
@@ -67,7 +66,7 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
     if (!client.ft_create) {                                              // ft.create / ft_create should tell us if we have it
       throw new Error(                                                    // otherwise exit / throw - we can't go any further.
         'Redis client instance has not enabled RediSearch.'
-      ); 
+      );
     }
     checked = true;                                                       // `checked` becomes true - which is in one scope level up
   };
@@ -88,7 +87,7 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
     return function(results) {                                            // closing over the `opts`
       let
         totalResults = results[0];                                        // first one is just the number of results as returned by RediSearch
-      
+
       if (opts.noContent === true) {
         results = _(results.slice(1))
           .map(function(aResult) {
@@ -113,23 +112,23 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
         results       : results,                                          // results of the search
         totalResults  : totalResults,                                     // number of results irrespective of LIMIT clauses
         offset        : opts.offset || 0,                                 // offset, if we've got one
-        resultSize    : results.length,                                   // number of results returned (sugar to for easy logic to see if we're at the end of the result set) 
-        requestedResultSize    
-                      : opts.numberOfResults || defaultNumberOfResults,   // How many per this result set requested
+        resultSize    : results.length,                                   // number of results returned (sugar to for easy logic to see if we're at the end of the result set)
+        requestedResultSize:
+            opts.numberOfResults || defaultNumberOfResults,               // How many per this result set requested
       };
     };
   };
-  
+
 
   /* directly returned functions */
   const createIndex = function(fields,passedOptsOrCb,passedCb) {          // create an index - should be called only once.
     let
       createArgs  = [],                                                   // we'll add in our Redis arguments to this variable
       lastArgs    = optionalOptsCbHandler(passedOptsOrCb,passedCb);       // handle the last two optional arguments
-   
+
     if (!checked) { clientCheck(); }                                      // bindings check
                                                                           // push options if items are set to `true` in the options object
-    if (lastArgs.opts.noOffsets) { createArgs.push(s.noOffsets); }        
+    if (lastArgs.opts.noOffsets) { createArgs.push(s.noOffsets); }
     if (lastArgs.opts.noFields) { createArgs.push(s.noFields); }
     if (lastArgs.opts.noFreqs) { createArgs.push(s.noFreqs); }
     if (lastArgs.opts.noStopWords) {                                      // `noStopWords` is mutually exclusive with `stopwords`
@@ -146,20 +145,20 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
   };
   const dropIndex = function(cb) {
     if (!checked) { clientCheck(); }
-    
+
     client.ft_drop(key,cb);
   };
 
   /* function factories either returned directly with the client or used in pipelines */
   const searchFactory = function(cObj) {                                  // close over the `cObj` which can either be the general client or the pipeline instance
     return function(queryString, passedOptsOrCb, passedCb) {              // query + our optional arguments
-      let 
+      let
         lastArgs = optionalOptsCbHandler(passedOptsOrCb,passedCb),        // handle the last two optional arguments
         searchArgs = [],                                                  // where all our arguments will be collected
         parser = searchResultParserFactory(lastArgs.opts);                // parse the results
 
       if (!checked) { clientCheck(); }                                    // bindings check
-      
+
       searchArgs.push(queryString);
 
       if (lastArgs.opts.noContent) {
@@ -196,21 +195,41 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
       let
         lastArgs = optionalOptsCbHandler(passedOptsOrCb,passedCb),        // handle the last two optional arguments
         addArgs   = [docId];                                              // start off the arguments to pass to RediSearch
-      
+
       if (!checked) { clientCheck(); }                                    // bindings check
-        
+
       addArgs.push(lastArgs.opts.score || 1, s.fields);                   // Score, if we've got one and then FIELDS
       Object.keys(values).forEach(function(aField) {                      // Get the keys of the passed in plain object then iterate
         addArgs.push(aField,values[aField]);                              // interlace field name / value
       });
-      cObj.ft_add(key,addArgs,lastArgs.cb);                               // run the command with the `key` established on instantiation and our arguments 
+      cObj.ft_add(key,addArgs,lastArgs.cb);                               // run the command with the `key` established on instantiation and our arguments
+      return chainer(cObj);                                               // return the correct object for chaining.
+    };
+  };
+
+  const delDocFactory = function(cObj) {                                  // close over the `cObj` which can either be the general client or the pipeline instance
+    //cObj is either a `client` or pipeline instance
+    return function(docId, passedOptsOrCb, passedCb) {                    // `docId` + `document` (as an object) and optional arguments
+      let
+        lastArgs = optionalOptsCbHandler(passedOptsOrCb,passedCb),        // handle the last two optional arguments
+        parser    = docResultParserFactory(lastArgs.opts);                // parse the results
+
+      if (!checked) { clientCheck(); }                                    // bindings check
+
+      cObj.ft_del(key, docId, function(err, doc){                         // run the command with the `key` established on instantiation and the `docId`
+        if (err) { lastArgs.cb(err); } else {                             // handle the errors
+          if (lastArgs.cb !== noop) {                                     // if we have a noop in the callback then we do nothing...
+            lastArgs.cb(err,parser(doc));                                 // otherwise we run the parser and pass it back to the callback.
+          }
+        }
+      });                               // run the command with the `key` established on instantiation and our arguments
       return chainer(cObj);                                               // return the correct object for chaining.
     };
   };
 
   const getDocFactory = function(cObj) {                                  // close over the `cObj` which can either be the general client or the pipeline instance
     return function(docId, passedOptsOrCb, passedCb) {                    // `docId` and optional arguments
-      let 
+      let
         lastArgs  = optionalOptsCbHandler(passedOptsOrCb,passedCb),       // handle the last two optional arguments
         parser    = docResultParserFactory(lastArgs.opts);                // parse the results
 
@@ -229,7 +248,7 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
       });
       return chainer(cObj);                                               // return the correct object for chaining.
     };
-  }
+  };
 
   const execFactory = function(cObj) {                                    // exec a pipeline with the correct pipeline
     return function(cb) {                                                 // accept a callback (`cb`). It's required in this case otherwise it'd be a useless function
@@ -248,15 +267,15 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
 
   const pipelineFactory = function(fnName) {                              // create a pipeline - `fnName` is the function name - allows for future expansion to MULTI
     return function(passedPipeline) {                                     // return a function - `passedPipeline` is optional - an existing pipeline
-      let 
+      let
         ctx = passedPipeline || client[fnName]();                         // if we have a passed pipeline, then use that, otherwise, create a pipeline
-      
+
       Object.getPrototypeOf(ctx).rediSearch = {                           // monkey patch the prototype with these extra functions in the `rediSearch` object
         add     : addFactory(ctx),                                        // `rediSearch.add` - add a document
         getDoc  : getDocFactory(ctx),                                     // `rediSearch.getDoc` - get a document by ID
         search  : searchFactory(ctx),                                     // `rediSearch.search` - search for a document by a query
 
-        exec    : execFactory(ctx)                                        // `rediSearch.exec` run the pipeline                            
+        exec    : execFactory(ctx)                                        // `rediSearch.exec` run the pipeline
       };
       return ctx;                                                         // return `ctx` for chaining
     };
@@ -282,7 +301,7 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
       if (sortable) { field.push(s.sortable); }                           // Add SORTABLE if it is
       return field;                                                       // return the array
     },
-    numeric     : genericField(s.numeric),                                // numeric fields 
+    numeric     : genericField(s.numeric),                                // numeric fields
     geo         : genericField(s.geo),                                    // geo fields,
     tag         : function(name, fieldOpts) {
       let field = [name, s.tag];
@@ -309,13 +328,15 @@ module.exports = function(clientOrNodeRedis,key,passedOptsOrCb,passedCb) {// Thi
   return rediSearchObj = {
     createIndex       : createIndex,
     dropIndex         : dropIndex,
-    
+
     add               : addFactory(client),
-    getDoc            : getDocFactory(client),    
+    getDoc            : getDocFactory(client),
     search            : searchFactory(client),
 
+    delDoc            : delDocFactory(client),
+
     batch             : pipelineFactory('batch'),
-    
+
     fieldDefinition   : fieldDefinition,
     client            : client                                            // the client specified is returned back for easy access (useful if the client created it)
   };
